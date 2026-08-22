@@ -30,13 +30,22 @@ bootstrap:
     set -euo pipefail
 
     # Consumed by envsubst rather than helm. GITOPS_REPO_URL is also declared
-    # requiredEnv in helmfile.yaml, so a render catches it too; the other two
-    # are only ever seen here. `_apply-repo-secret` guards these again for its
-    # own sake; repeated here to fail before the cluster is touched at all,
-    # rather than after `helmfile apply` has already created things.
+    # requiredEnv in helmfile.yaml, so a render catches it too; the GitHub App
+    # credential is only ever seen here. `_apply-repo-secret` guards these again
+    # for its own sake; repeated here to fail before the cluster is touched at
+    # all, rather than after `helmfile apply` has already created things.
     : "${GITOPS_REPO_URL:?set GITOPS_REPO_URL in .env}"
-    : "${GITOPS_REPO_USERNAME:?set GITOPS_REPO_USERNAME in .env}"
-    : "${GITOPS_REPO_PASSWORD:?set GITOPS_REPO_PASSWORD in .env}"
+    : "${GITOPS_REPO_GITHUB_APP_ID:?set GITOPS_REPO_GITHUB_APP_ID in .env}"
+    : "${GITOPS_REPO_GITHUB_APP_INSTALLATION_ID:?set GITOPS_REPO_GITHUB_APP_INSTALLATION_ID in .env}"
+    : "${GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH:?set GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH in .env}"
+    # Same reasoning one step further: the key is a file, and a path that is set
+    # but wrong fails just as late as one that is empty. Cheap to read now,
+    # expensive to discover after the release is installed.
+    [ -r "$GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH" ] || {
+        echo "Refusing: cannot read the GitHub App private key at '$GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH'." >&2
+        echo "GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH must be an absolute path to the .pem file." >&2
+        exit 1
+    }
 
     # Captured, not inlined into the echo: a command substitution that fails
     # inside `echo` still leaves `echo` succeeding, so `set -e` would not fire
@@ -87,7 +96,7 @@ bootstrap:
     echo "==> $step: Argo CD now reconciles clusters/$TARGET_CLUSTER_NAME/."
     echo "Check it with 'just verify', open the UI with 'just argo-ui'."
 
-[doc("Apply the gitops repository credential Secret with .env expanded into it.")]
+[doc("Apply the gitops repository credential Secret — the GitHub App — with .env expanded into it.")]
 _apply-repo-secret:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -96,9 +105,62 @@ _apply-repo-secret:
     # holding a credential that authenticates against nothing — the same silent
     # emptiness the requiredEnv declarations in helmfile.yaml exist to prevent.
     : "${GITOPS_REPO_URL:?set GITOPS_REPO_URL in .env}"
-    : "${GITOPS_REPO_USERNAME:?set GITOPS_REPO_USERNAME in .env}"
-    : "${GITOPS_REPO_PASSWORD:?set GITOPS_REPO_PASSWORD in .env}"
-    envsubst '$GITOPS_REPO_URL $GITOPS_REPO_USERNAME $GITOPS_REPO_PASSWORD' \
+    : "${GITOPS_REPO_GITHUB_APP_ID:?set GITOPS_REPO_GITHUB_APP_ID in .env}"
+    : "${GITOPS_REPO_GITHUB_APP_INSTALLATION_ID:?set GITOPS_REPO_GITHUB_APP_INSTALLATION_ID in .env}"
+    : "${GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH:?set GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH in .env}"
+
+    # `:?` catches unset and empty, not wrong, and every wrong value here
+    # produces the same outcome: a Secret the API server accepts and Argo CD
+    # cannot clone with. The checks below name the ones worth catching early.
+    #
+    # Both ids are numeric — the Argo CD Secret example is `githubAppID: 1`
+    # and `githubAppInstallationID: 2` —
+    # https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/
+    # and GitHub shows the App ID beside a non-numeric Client ID that is easy to
+    # copy instead.
+    for var in GITOPS_REPO_GITHUB_APP_ID GITOPS_REPO_GITHUB_APP_INSTALLATION_ID; do
+        case "${!var}" in
+            *[!0-9]*)
+                echo "$var must be the numeric id, not '${!var}'." >&2
+                echo "The App ID is not the Client ID; see .env.example." >&2
+                exit 1 ;;
+        esac
+    done
+
+    key_path="$GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH"
+    [ -r "$key_path" ] || {
+        echo "Cannot read the GitHub App private key at '$key_path'." >&2
+        exit 1
+    }
+    # A public key, a downloaded HTML page or a truncated copy all read fine and
+    # all fail at clone time with an error about the credential rather than
+    # about the file.
+    grep -q -- '-----BEGIN .*PRIVATE KEY-----' "$key_path" || {
+        echo "'$key_path' is not a PEM private key." >&2
+        echo "It should be the .pem GitHub downloaded, starting -----BEGIN RSA PRIVATE KEY-----." >&2
+        exit 1
+    }
+    # And a passphrase-protected key is a private key that still cannot be used:
+    # nothing in argocd-repo-server can be prompted for a passphrase, so it too
+    # fails at first clone. Both spellings — PKCS#8's own BEGIN line and PKCS#1's
+    # Proc-Type header — mean the same thing here. GitHub never issues one, so
+    # this is a key that was encrypted after the fact; decrypt it with
+    # `openssl rsa -in <file> -out <file>` and point at the result.
+    if grep -q -e '-----BEGIN ENCRYPTED PRIVATE KEY-----' -e 'Proc-Type: 4,ENCRYPTED' "$key_path"; then
+        echo "'$key_path' is passphrase-protected, which Argo CD cannot use unattended." >&2
+        echo "Decrypt it, or generate a fresh key on the GitHub App's settings page." >&2
+        exit 1
+    fi
+
+    # Base64 on one line, because envsubst expands into YAML that it does not
+    # parse: a multi-line PEM would land under `stringData:` with its
+    # continuation lines at column zero. `base64 | tr -d` rather than `base64
+    # -w0`, which is GNU-only and would fail on macOS. See bootstrap/repo-secret.yaml.
+    GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_B64=$(base64 < "$key_path" | tr -d '\n')
+    export GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_B64
+    : "${GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_B64:?empty encoding of '$key_path' — is the file empty?}"
+
+    envsubst '$GITOPS_REPO_URL $GITOPS_REPO_GITHUB_APP_ID $GITOPS_REPO_GITHUB_APP_INSTALLATION_ID $GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_B64' \
         < bootstrap/repo-secret.yaml | kubectl apply -f -
 
 [doc("Apply the root Application with .env expanded into it.")]

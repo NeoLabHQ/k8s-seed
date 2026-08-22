@@ -36,11 +36,68 @@ This check is cheap and the mistake it prevents is not. Bootstrap is a one-time,
 admin-credentialed, imperative operation; there is no dry run that tells you
 afterwards which cluster you hit.
 
+## Register the GitHub App
+
+Argo CD clones the gitops repository as a GitHub App, per
+[the Argo CD GitHub App credential docs][argocd-github-app]. One app can serve
+every cluster: unlike the OAuth App below it has no callback URL, so there is
+nothing per-cluster about it.
+
+[argocd-github-app]: https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/#github-app-credential
+
+In the organisation that owns the gitops repository, under **Settings → Developer
+settings → GitHub Apps → New GitHub App**
+([docs](https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/creating-a-github-app)):
+
+- **Where can this GitHub App be installed?** — *Only on this account*.
+- **Webhook** — deselect *Active*. The app only clones; it needs no events.
+- **Permissions** — *Repository permissions → Contents: Read-only*, and nothing
+  else. Argo CD's wording: "Ensure your application has at least `Read-only`
+  permissions to the `Contents` of the repository. This is the minimum
+  requirement." ([docs][argocd-github-app]). GitHub's, from
+  [choosing permissions for a GitHub App][gh-permissions], is that `Contents` is
+  the permission to request "to authenticate for HTTP-based Git access". Leave
+  the Metadata permission at whatever GitHub selects: neither page states that
+  it is mandatory, so this runbook neither asserts it nor tells you to lower it.
+  If you later reuse this app for something else — the ApplicationSet Pull
+  Request generator, GitHub notifications, anything that writes back —
+  `.env.example` carries the beyond-minimum list, one sourced entry per feature,
+  because no upstream page collects them.
+
+[gh-permissions]: https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app
+
+Then, from the app's page:
+
+1. **Generate a private key** under *Private keys*. GitHub downloads a `.pem`
+   and keeps only the public half, so that file is the only copy —
+   [managing private keys][gh-private-keys]. Save it outside this repository.
+2. **Install App** on the account, choosing *Only select repositories* → the
+   gitops repository — [installing your own GitHub App][gh-install].
+3. Note the **App ID** from the app's settings page. It is not the Client ID
+   shown beside it: "The app ID is different from the client ID"
+   ([docs][gh-install-token]).
+4. Note the **installation ID**, the number at the end of the installation's
+   settings URL, `https://github.com/organizations/<org>/settings/installations/<id>`.
+   The documented route is the REST API — `GET /orgs/{org}/installation` and
+   friends ([docs][gh-install-token]) — which needs the app's own JWT; the URL
+   is the practical one.
+
+[gh-private-keys]: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps
+[gh-install]: https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
+[gh-install-token]: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
+
+Nothing in this repository ever stores the key itself — `.env` holds the path to
+the `.pem`, and `just bootstrap` reads it.
+
 ## Register the GitHub OAuth App
 
 Argo CD authenticates users through the Dex bundled in its Helm chart, and Dex
 delegates to GitHub. Each cluster needs its own GitHub OAuth App, because an
 OAuth App allows exactly one callback URL and each cluster has its own hostname.
+
+An OAuth App is not the GitHub App from the previous section. Different
+registration page, different credentials, no overlap: this one signs humans in to
+the UI, that one is how Argo CD clones. You need both.
 
 In your GitHub organisation, under **Settings → Developer settings → OAuth Apps**,
 create a new app:
@@ -68,9 +125,13 @@ place; the shape of it is:
 
 - `TARGET_CLUSTER_NAME` — the only value that differs between clusters. It selects
   `clusters/<name>/` in the gitops repository.
-- `GITOPS_REPO_URL`, `GITOPS_TARGET_REVISION`, and `GITOPS_REPO_USERNAME` /
-  `GITOPS_REPO_PASSWORD` — the git credential Argo CD reads that repository
-  with.
+- `GITOPS_REPO_URL` and `GITOPS_TARGET_REVISION` — where the gitops repository
+  is and which revision to track. The URL must be the HTTPS one; a GitHub App
+  authenticates git over HTTP, not SSH.
+- `GITOPS_REPO_GITHUB_APP_ID`, `GITOPS_REPO_GITHUB_APP_INSTALLATION_ID` and
+  `GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH` — the GitHub App you just
+  registered. The last one is the path to the `.pem`, not its contents; the
+  recipe reads and encodes the file, so nothing multi-line ever goes in `.env`.
 - `ARGO_HOST` — the hostname from the OAuth App you just registered.
 - `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` — that app's credentials.
 - `GITHUB_ORG` — the organisation allowed to sign in. Optional, but leaving it
@@ -159,8 +220,10 @@ kubectl get application root --namespace argocd \
 repository, and it resolves itself the moment you commit `clusters/<name>/`.
 Nothing is wrong with the seed.
 
-**Argo CD cannot reach the repository at all.** A wrong URL, an expired token, a
-credential for a different repository. The message names the failure instead —
+**Argo CD cannot reach the repository at all.** A wrong URL, a GitHub App that
+was never installed on this repository or has lost its `Contents: Read-only`
+permission, a revoked private key, an App ID or installation ID belonging to
+something else. The message names the failure instead —
 `authentication required`, `repository not found`, a host that will not resolve.
 The same errors appear where the fetch actually happens:
 

@@ -23,7 +23,7 @@ where ApplicationSets and overlays are built for exactly that.
 The irreducible seed is three things:
 
 - the `argo-cd` Helm release,
-- the Secret holding the gitops repository credential,
+- the Secret holding the gitops repository credential — a GitHub App,
 - the root `Application`, pointing at `clusters/<TARGET_CLUSTER_NAME>/`.
 
 ## Layout
@@ -94,8 +94,10 @@ just argo-ui            # port-forward the UI to http://localhost:8080
 `just --list` shows the rest. `just contexts` and `just current-context` are
 worth running before `just bootstrap`.
 
-Full walkthrough, including registering the GitHub OAuth App and reading the
-failure modes: **[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md)**.
+Full walkthrough, including registering the two GitHub apps this needs — the
+GitHub App that reads the gitops repository, the OAuth App that signs users in —
+and reading the failure modes:
+**[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md)**.
 
 What the gitops repository has to provide for any of this to be useful:
 **[docs/gitops-repo.md](docs/gitops-repo.md)**.
@@ -129,10 +131,19 @@ expanded by the `envsubst` call in the applying recipe, so add the name to that
 recipe's substitution list and guard it there with `: "${VAR:?set VAR in .env}"`.
 The guard is not optional: `envsubst` turns an unset or empty variable into the
 empty string and exits 0, so without it the manifest reaches the cluster
-structurally valid and quietly blank. `GITOPS_REPO_USERNAME`,
-`GITOPS_REPO_PASSWORD` and `GITOPS_TARGET_REVISION` are this kind.
-`GITOPS_REPO_URL` is deliberately both — guarded in the recipes *and* declared
-`requiredEnv`, so a bare `helmfile apply` catches it too.
+structurally valid and quietly blank. `GITOPS_REPO_GITHUB_APP_ID`,
+`GITOPS_REPO_GITHUB_APP_INSTALLATION_ID`,
+`GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH` and `GITOPS_TARGET_REVISION` are this
+kind. `GITOPS_REPO_URL` is deliberately both — guarded in the recipes *and*
+declared `requiredEnv`, so a bare `helmfile apply` catches it too.
+
+*Multi-line values* do not go in `.env` at all. `envsubst` expands into YAML it
+does not parse, so a substituted blob with newlines in it lands with its
+continuation lines at column zero and the manifest stops parsing. The GitHub App
+private key is the case in point: `.env` carries the *path* to the `.pem` file,
+and `_apply-repo-secret` reads it, base64-encodes it to one line, and substitutes
+that into `data:` — where the API server decodes it back to the original bytes.
+Anything else multi-line should follow the same route.
 
 **Checking a change without a cluster:**
 
@@ -163,6 +174,14 @@ rather than a reshaping of the seed.
 
 Set `GITHUB_ORG` to restrict who can complete the sign-in to members of one
 organisation. It is optional and narrows authentication only.
+
+That OAuth App logs *people* in. How Argo CD itself reads the gitops repository
+is a separate identity and a separate registration: a **GitHub App**, installed
+on the repository with `Contents: Read-only`, whose App ID, installation ID and
+private key make up `bootstrap/repo-secret.yaml`. The two are easy to confuse and
+cannot substitute for one another — `.env.example` documents both, and
+[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md) walks through
+registering them.
 
 Authorisation is separate and the seed grants none of it: Argo CD's default RBAC
 policy is empty, so a user who signs in successfully can still do nothing.
