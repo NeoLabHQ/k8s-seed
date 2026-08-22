@@ -204,7 +204,18 @@ create-local-cluster:
     name="${CLUSTER_NAME:-k8s-seed}"
     k3d cluster create "$name"
     k3d kubeconfig merge "$name" --kubeconfig-switch-context
-    kubectl cluster-info --context "$name"
+    kubectl config use-context "k3d-$name"
+    kubectl config current-context
+    kubectl cluster-info
+    kubectl get pods --all-namespaces
+
+switch-to-local-cluster:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="${CLUSTER_NAME:-k3d-k8s-seed}"
+    kubectl config use-context "$name"
+    kubectl config current-context
+    kubectl cluster-info
     kubectl get pods --all-namespaces
 
 [doc("Delete a local k3d cluster")]
