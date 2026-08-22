@@ -75,7 +75,7 @@ Install CLIs:
 * [Helm Diff](https://github.com/databus23/helm-diff) - A helm plugin that shows a diff explaining what a helm upgrade would change
 * [Hemlile](https://github.com/roboll/helmfile) - One file for manage multiple heml charts.
 * [Justfile](https://github.com/casey/just) - install by `cargo install just`
-
+* [k3d](https://k3d.io/) - install by `brew install k3d` - for local development
 
 ## Usage
 

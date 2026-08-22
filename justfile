@@ -197,13 +197,22 @@ current-context:
 # LOCAL TEST CLUSTER
 # ---------------------------------------------------------------------------------------------------------------------
 
-[doc("Create a local kind cluster to try the seed against. Delete it with `kind delete cluster --name <name>`.")]
-kind-cluster:
+[doc("Create a local k3d cluster to try the seed against. Delete it with `k3d cluster delete <name>`.")]
+create-local-cluster:
     #!/usr/bin/env bash
     set -euo pipefail
     name="${CLUSTER_NAME:-k8s-seed}"
-    kind create cluster --name "$name"
-    kubectl cluster-info --context "kind-$name"
+    k3d cluster create "$name"
+    k3d kubeconfig merge "$name" --kubeconfig-switch-context
+    kubectl cluster-info --context "$name"
+    kubectl get pods --all-namespaces
+
+[doc("Delete a local k3d cluster")]
+delete-local-cluster:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="${CLUSTER_NAME:-k8s-seed}"
+    k3d cluster delete "$name"
 
 # ---------------------------------------------------------------------------------------------------------------------
 # DEVCONTAINER
