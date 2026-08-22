@@ -1,0 +1,21 @@
+name: Agent Implement Task
+
+on:
+  push:
+    paths:
+      - '.specs/tasks/todo/**.md'
+    branches:
+      - master
+
+jobs:
+  implement-task:
+    uses: NeoLabHQ/devops/.github/workflows/agent-implement-task.yml@master
+    with:
+      language: typescript  # or 'python', or remove 'with:' block for no deps
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

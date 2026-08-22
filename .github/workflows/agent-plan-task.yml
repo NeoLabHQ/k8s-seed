@@ -1,0 +1,18 @@
+name: Agent Plan Task
+
+on:
+  push:
+    paths:
+      - '.specs/tasks/draft/**.md'
+    branches:
+      - master
+jobs:
+  plan-task:
+    uses: NeoLabHQ/devops/.github/workflows/agent-plan-task.yml@master
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

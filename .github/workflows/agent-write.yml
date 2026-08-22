@@ -1,0 +1,32 @@
+name: Agent Write
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  agent:
+    if: |
+      github.event.sender.type != 'Bot' &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@agent')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@agent')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@agent')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@agent') || contains(github.event.issue.title, '@agent')))
+      )
+    uses: NeoLabHQ/devops/.github/workflows/agent-write.yml@master
+    with:
+      language: typescript  # or 'python', or remove 'with:' block for no deps
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

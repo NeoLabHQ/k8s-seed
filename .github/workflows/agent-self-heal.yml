@@ -1,0 +1,22 @@
+name: Agent Self-Heal
+
+on:
+  workflow_run:
+    # List the CI workflow(s) whose failures should be auto-healed. Use the
+    # workflow `name:` values, NOT filenames. Do NOT list this self-heal
+    # workflow itself.
+    workflows: ["Verify"]
+    types: [completed]
+
+jobs:
+  self-heal:
+    uses: NeoLabHQ/devops/.github/workflows/agent-self-heal.yml@master
+    with:
+      language: typescript  # or 'python', or remove 'with:' block for no deps
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

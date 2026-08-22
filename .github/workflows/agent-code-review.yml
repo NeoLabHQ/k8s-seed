@@ -1,0 +1,24 @@
+name: Agent Code Review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, reopened]
+    # Optional: Only run on specific file changes
+    paths:
+      - "src/**/*.ts"
+      - "src/**/*.tsx"
+      - "src/**/*.js"
+      - "src/**/*.jsx"
+      - "src/**/*.gql"
+jobs:
+  agent-review:
+    uses: NeoLabHQ/devops/.github/workflows/agent-code-review.yml@master
+    with:
+      language: typescript  # or 'python', or remove 'with:' block for no deps
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
