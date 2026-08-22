@@ -1,5 +1,5 @@
 # The handoff. Applying this is the last imperative act against the cluster:
-# from here Argo CD reconciles clusters/${CLUSTER_NAME}/ in the gitops
+# from here Argo CD reconciles clusters/${TARGET_CLUSTER_NAME}/ in the gitops
 # repository, including the Application that manages Argo CD itself.
 #
 # `${...}` placeholders are expanded from the environment by `just bootstrap`.
@@ -28,7 +28,7 @@ spec:
     # Quoted so a revision like `1.0` is not read as a number.
     repoURL: "${GITOPS_REPO_URL}"
     targetRevision: "${GITOPS_TARGET_REVISION}"
-    path: "clusters/${CLUSTER_NAME}"
+    path: "clusters/${TARGET_CLUSTER_NAME}"
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

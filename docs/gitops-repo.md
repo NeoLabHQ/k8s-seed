@@ -22,7 +22,7 @@ from a laptop against production belongs on the other side of the line.
 
 ## Required layout
 
-The root Application resolves `clusters/<CLUSTER_NAME>/`, on the branch given by
+The root Application resolves `clusters/<TARGET_CLUSTER_NAME>/`, on the branch given by
 `GITOPS_TARGET_REVISION`.
 
 Use cluster-scoped paths from day one, even while there is only one cluster.

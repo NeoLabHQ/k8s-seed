@@ -14,7 +14,7 @@ environments:
       # requiredEnv, not `env | default`: a production cluster silently seeded
       # at argo.k8s.local pointing at no gitops repository is worse than a
       # failed render. Missing values fail here, before the cluster is touched.
-      - clusterName: {{ requiredEnv "CLUSTER_NAME" | quote }}
+      - clusterName: {{ requiredEnv "TARGET_CLUSTER_NAME" | quote }}
         argoHost: {{ requiredEnv "ARGO_HOST" | quote }}
         # Nothing in the chart reads this. It is declared here so that the check
         # lives at render time for every caller, not only for `just bootstrap`:

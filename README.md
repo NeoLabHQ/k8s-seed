@@ -24,7 +24,7 @@ The irreducible seed is three things:
 
 - the `argo-cd` Helm release,
 - the Secret holding the gitops repository credential,
-- the root `Application`, pointing at `clusters/<CLUSTER_NAME>/`.
+- the root `Application`, pointing at `clusters/<TARGET_CLUSTER_NAME>/`.
 
 ## Layout
 
@@ -33,7 +33,7 @@ helmfile.yaml                      the argo repository, one release, one environ
 bootstrap/
   argocd-values.yaml.gotmpl        chart values, rendered by helmfile as a Go template
   repo-secret.yaml                 gitops repository credential
-  root-app.yaml                    root Application -> clusters/<CLUSTER_NAME>/
+  root-app.yaml                    root Application -> clusters/<TARGET_CLUSTER_NAME>/
 docs/
   how-to-launch-cluster.md         the operational runbook
   gitops-repo.md                   what this repository expects of the gitops repository
@@ -49,7 +49,7 @@ gitops repository: a main cluster, which also hosts Kargo, plus dev, staging and
 per-white-label production clusters. No cluster reaches another's Kubernetes API.
 
 Because the seed has to be identical on every one of them, exactly one value here
-is per-cluster: **`CLUSTER_NAME`**, which selects `clusters/<name>/`. Everything
+is per-cluster: **`TARGET_CLUSTER_NAME`**, which selects `clusters/<name>/`. Everything
 else — the gitops repository URL and credential, the Argo CD hostname, the OIDC
 client — is environment configuration, not topology.
 
@@ -59,11 +59,15 @@ visible rather than hiding the last one in a lifecycle hook:
 1. `helmfile apply` — namespace, argo-cd release, then the repository credential
 2. wait for `argocd-server`
 3. `kubectl apply -f bootstrap/root-app.yaml`
-4. Argo CD syncs `clusters/<CLUSTER_NAME>/`, which contains the Application that
+4. Argo CD syncs `clusters/<TARGET_CLUSTER_NAME>/`, which contains the Application that
    manages Argo CD itself — handoff complete
 
 After step 4 the cluster manages itself and **bootstrap must never be run against
 it again**. See [docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md).
+
+### Critical
+
+`kubectl` uses `TARGET_CLUSTER_NAME` for the current cluster context, while this .env file and bootstrap script use `TARGET_TARGET_CLUSTER_NAME`, to avvoid collision of it for local development. But for production clusters they must be the same!
 
 ## Requirements
 

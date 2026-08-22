@@ -66,7 +66,7 @@ values, not of the seed: see `OIDC_ISSUER_URL` below.
 Copy `.env.example` to `.env` and fill it in. Every field is documented in
 place; the shape of it is:
 
-- `CLUSTER_NAME` — the only value that differs between clusters. It selects
+- `TARGET_CLUSTER_NAME` — the only value that differs between clusters. It selects
   `clusters/<name>/` in the gitops repository.
 - `GITOPS_REPO_URL`, `GITOPS_TARGET_REVISION`, and `GITOPS_REPO_USERNAME` /
   `GITOPS_REPO_PASSWORD` — the git credential Argo CD reads that repository
@@ -83,7 +83,7 @@ before anything is created, so a botched `.env` cannot leave you
 half-bootstrapped. Which message you get depends on who reads the value: the
 chart values fail during template rendering with helmfile naming the variable,
 while the credential and the root Application's parameters fail on a shell guard
-in the recipe, as `CLUSTER_NAME: set CLUSTER_NAME in .env`.
+in the recipe, as `TARGET_CLUSTER_NAME: set TARGET_CLUSTER_NAME in .env`.
 
 ## Run the bootstrap
 
@@ -97,7 +97,7 @@ Four things happen:
    Helm release, then the gitops repository credential Secret is applied.
 2. The recipe waits for `argocd-server` to roll out.
 3. `bootstrap/root-app.yaml` is applied — an Argo CD `Application` pointing at
-   `clusters/$CLUSTER_NAME/` in the gitops repository.
+   `clusters/$TARGET_CLUSTER_NAME/` in the gitops repository.
 4. Argo CD syncs that path. Among the Applications it finds there is one that
    manages Argo CD itself. That is the handoff.
 
@@ -214,7 +214,7 @@ After the handoff they carry the same hazard as bootstrap.
 ## Main cluster versus a spoke
 
 The procedure above does not change. The only difference in this repository is
-`CLUSTER_NAME`.
+`TARGET_CLUSTER_NAME`.
 
 Everything that actually distinguishes the main cluster lives in the gitops
 repository: `clusters/main/` additionally carries Kargo, which the spokes do not
