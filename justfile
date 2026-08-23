@@ -259,17 +259,75 @@ current-context:
 # LOCAL TEST CLUSTER
 # ---------------------------------------------------------------------------------------------------------------------
 
-[doc("Create a local k3d cluster to try the seed against. Delete it with `k3d cluster delete <name>`.")]
+[doc("Create a local k3d cluster to try the seed against. Delete it with `just delete-local-cluster`.")]
 create-local-cluster:
     #!/usr/bin/env bash
     set -euo pipefail
     name="${CLUSTER_NAME:-k8s-seed}"
     k3d cluster create "$name"
-    k3d kubeconfig merge "$name" --kubeconfig-switch-context
-    kubectl config use-context "k3d-$name"
-    kubectl config current-context
+    just use-local-cluster
+
+[doc("""
+  Point kubectl at the local k3d cluster, from the host or from inside the devcontainer.
+
+  Description:
+    Inside the devcontainer docker is the *host's* daemon, so the k3d nodes are sibling
+    containers: the API port k3d publishes lands on the host, and the kubeconfig k3d
+    writes (https://0.0.0.0:<port>) is unreachable from in here. This joins the
+    devcontainer to the cluster's own docker network and addresses the load balancer by
+    container name, which is a SAN on the API server certificate — so TLS verification
+    still holds and no --insecure-skip-tls-verify is needed. On the host it uses the
+    published port as usual.
+
+    Re-run it after `just sandbox` recreates the container: a docker network attachment
+    does not survive that.
+
+  Usage:
+    just use-local-cluster
+""")]
+use-local-cluster:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="${CLUSTER_NAME:-k8s-seed}"
+
+    k3d cluster list "$name" >/dev/null 2>&1 || {
+        echo "no k3d cluster '$name' — run 'just create-local-cluster'" >&2
+        exit 1
+    }
+
+    if [ -f /.dockerenv ]; then
+        # k3d's network is a user-defined bridge, which — unlike the default bridge the
+        # devcontainer sits on — resolves container names via docker's embedded DNS.
+        # That is what makes the serverlb address below resolvable at all.
+        docker network connect "k3d-$name" "$(cat /etc/hostname)" 2>/dev/null || true
+        server="https://k3d-$name-serverlb:6443"
+    else
+        port=$(docker port "k3d-$name-serverlb" 6443/tcp 2>/dev/null | head -n1 | sed 's/.*://') || true
+        : "${port:?could not read the published API port of k3d-$name-serverlb}"
+        server="https://127.0.0.1:$port"
+    fi
+
+    k3d kubeconfig merge "$name" --kubeconfig-merge-default >/dev/null
+    kubectl config set-cluster "k3d-$name" --server="$server" >/dev/null
+    kubectl config use-context "k3d-$name" >/dev/null
+
+    # Assert rather than print: an unreachable API and a node that refuses to schedule
+    # both leave `cluster-info` looking perfectly healthy.
     kubectl cluster-info
-    kubectl get pods --all-namespaces
+    kubectl wait --for=condition=Ready --timeout=60s node --all
+
+    # A full docker disk taints the node NoSchedule, and every later symptom — Argo CD
+    # stuck Pending, `verify` timing out — then points somewhere other than the cause.
+    taints=$(kubectl get node -o jsonpath='{.items[*].spec.taints[*].key}' || true)
+    case "$taints" in
+        *disk-pressure*)
+            echo "node is tainted node.kubernetes.io/disk-pressure:NoSchedule — nothing new will schedule." >&2
+            echo "free ~10GB on the docker disk, then wait up to 5m for the taint to clear." >&2
+            exit 1
+            ;;
+    esac
+
+    echo "kubectl context $(kubectl config current-context) -> $server"
 
 switch-to-local-cluster:
     #!/usr/bin/env bash

@@ -9,8 +9,10 @@ Budget about fifteen minutes, most of it waiting for pods.
 ## Before you start
 
 You need a reachable cluster and a kubectl context pointing at it. The seed
-does not create the cluster — use your provider's tooling, or `just kind-cluster`
-for a throwaway local one.
+does not create the cluster — use your provider's tooling, or
+`just create-local-cluster` for a throwaway local one. That recipe creates a
+k3d cluster and switches your kubectl context to it, named `k3d-<name>`
+(`k3d-k8s-seed` by default); delete it again with `just delete-local-cluster`.
 
 Install these CLIs:
 
@@ -23,7 +25,7 @@ Install these CLIs:
 - [just](https://github.com/casey/just)
 - `envsubst`, from GNU gettext. Present on most Linux distributions; on macOS
   `brew install gettext`.
-- [kind](https://kind.sigs.k8s.io/), only if you want `just kind-cluster`.
+- [k3d](https://k3d.io/), only if you want `just create-local-cluster`.
 
 Confirm you are pointed at the cluster you think you are:
 
@@ -54,15 +56,20 @@ settings → GitHub Apps → New GitHub App**
 - **Permissions** — *Repository permissions → Contents: Read-only*, and nothing
   else. Argo CD's wording: "Ensure your application has at least `Read-only`
   permissions to the `Contents` of the repository. This is the minimum
-  requirement." ([docs][argocd-github-app]). GitHub's, from
-  [choosing permissions for a GitHub App][gh-permissions], is that `Contents` is
-  the permission to request "to authenticate for HTTP-based Git access". Leave
-  the Metadata permission at whatever GitHub selects: neither page states that
-  it is mandatory, so this runbook neither asserts it nor tells you to lower it.
+  requirement." ([docs][argocd-github-app]). GitHub names the same one from its
+  side, in [choosing permissions for a GitHub App][gh-permissions]: "If you want
+  your app to use an installation or user access token to authenticate for
+  HTTP-based Git access, you should request the `Contents` repository
+  permission."
+
+  Leave the Metadata permission at whatever GitHub selects: neither page states
+  that it is mandatory, so this runbook neither asserts it nor tells you to
+  lower it.
+
   If you later reuse this app for something else — the ApplicationSet Pull
-  Request generator, GitHub notifications, anything that writes back —
-  `.env.example` carries the beyond-minimum list, one sourced entry per feature,
-  because no upstream page collects them.
+  Request generator, GitHub notifications, anything that writes back — see
+  ["Beyond the minimum permission"](#beyond-the-minimum-permission) below, one
+  sourced entry per feature, because no upstream page collects them.
 
 [gh-permissions]: https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app
 
@@ -72,7 +79,10 @@ Then, from the app's page:
    and keeps only the public half, so that file is the only copy —
    [managing private keys][gh-private-keys]. Save it outside this repository.
 2. **Install App** on the account, choosing *Only select repositories* → the
-   gitops repository — [installing your own GitHub App][gh-install].
+   gitops repository — [installing your own GitHub App][gh-install]. Note that
+   "The app will always have at least read-only access to all public
+   repositories on GitHub" ([docs][gh-install]), so this step narrows private
+   access only.
 3. Note the **App ID** from the app's settings page. It is not the Client ID
    shown beside it: "The app ID is different from the client ID"
    ([docs][gh-install-token]).
@@ -82,12 +92,87 @@ Then, from the app's page:
    friends ([docs][gh-install-token]) — which needs the app's own JWT; the URL
    is the practical one.
 
+   This repository asks for the installation ID by choice, not because Argo CD
+   requires it. Of the CLI equivalent, Argo CD says: "The
+   `--github-app-installation-id` flag is optional. If omitted, Argo CD will
+   automatically discover the installation ID based on the repository's
+   organization." ([docs][argocd-github-app]). That sentence is about the flag;
+   nothing found says the Secret field may be omitted. Setting it explicitly
+   costs one lookup and removes the discovery step from the bootstrap path, so
+   this seed asks for it.
+
 [gh-private-keys]: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps
 [gh-install]: https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
 [gh-install-token]: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
 
 Nothing in this repository ever stores the key itself — `.env` holds the path to
-the `.pem`, and `just bootstrap` reads it.
+the `.pem`, not the key. A PEM is multi-line, and the road from `.env` to the
+Secret is not: even where a quoted multi-line value survives dotenv parsing,
+`envsubst` expands into YAML that it does not parse, so the second and every
+later line of the PEM would land at column zero and the manifest would stop
+parsing. `just bootstrap` reads the file and encodes it to a single base64 line
+instead, so the exact bytes reach the Secret and the key is never re-typed,
+re-quoted or re-indented on the way.
+
+### Beyond the minimum permission
+
+No single page enumerates the full set. Argo CD's feature pages name no
+permissions at all, so each entry below pairs the Argo CD page that says what a
+feature calls with GitHub's endpoint reference,
+[permissions required for GitHub Apps][gh-rest-permissions], which lists every
+REST endpoint under the permission and access level it requires. Grant one only
+when you switch that feature on, and only if you reuse this app for it.
+
+[gh-rest-permissions]: https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps
+
+- **ApplicationSet Pull Request generator** — Pull requests: Read-only. It "uses
+  the API of an SCMaaS provider (GitHub, Gitea, or Bitbucket Server) to
+  automatically discover open pull requests within a repository" and
+  authenticates with "A `Secret` name containing a GitHub App secret in
+  repo-creds format", which is this Secret's format —
+  [the Pull Request generator docs][argocd-pr-generator]. That page names no
+  permission. The call it must make, `GET /repos/{owner}/{repo}/pulls`, is
+  listed in the reference under Repository permissions for "Pull requests" at
+  access `read`.
+
+  [argocd-pr-generator]: https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-Pull-Request/
+
+- **ApplicationSet SCM Provider generator** — nothing beyond the baseline could
+  be established. It "uses the GitHub API to scan an organization in either
+  github.com or GitHub Enterprise" — [the SCM Provider generator docs][argocd-scm-provider]
+  — and its scan, `GET /orgs/{org}/repos`, is listed under Metadata at access
+  `read` — the Metadata permission described above, left as GitHub sets it.
+  Filtering repositories by file reads
+  `GET /repos/{owner}/{repo}/contents/{path}`, listed under Contents at access
+  `read`, which is already granted.
+
+  [argocd-scm-provider]: https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/Generators-SCM-Provider/
+
+- **Notifications to GitHub** — depends on what you send, and Argo CD says only
+  "Change repository permissions to enable write commit statuses and/or
+  deployments and/or pull requests comments" —
+  [the notifications GitHub service docs][argocd-notifications-github]. In the
+  reference those three are `POST /repos/{owner}/{repo}/statuses/{sha}` under
+  Commit statuses at access `write`; `POST /repos/{owner}/{repo}/deployments`
+  under Deployments at access `write`; and
+  `POST /repos/{owner}/{repo}/issues/{issue_number}/comments`, which is listed
+  under both Issues and Pull requests at access `write` and flagged there as
+  needing additional permissions. Which of those two suffices for a comment is
+  not something these pages settle — verify it against the notifications you
+  configure rather than granting both.
+
+  [argocd-notifications-github]: https://argo-cd.readthedocs.io/en/stable/operator-manual/notifications/services/github/
+
+- **Anything that writes to the gitops repository through this app** —
+  Contents: Read and write, because `PUT /repos/{owner}/{repo}/contents/{path}`
+  is listed under Contents at access `write`. Argo CD itself never writes. For
+  a tool that pushes with git instead of the contents API —
+  argocd-image-updater's git write-back is the common one — no page was found
+  stating the level git push requires, so confirm it before assuming
+  Read-only is enough or that write is.
+
+- **GitHub Enterprise Server** is not a permission but an extra Secret field,
+  `githubAppEnterpriseBaseUrl` — see `bootstrap/repo-secret.yaml`.
 
 ## Register the GitHub OAuth App
 
