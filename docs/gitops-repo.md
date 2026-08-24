@@ -22,8 +22,8 @@ from a laptop against production belongs on the other side of the line.
 
 ## Required layout
 
-The root Application resolves `clusters/<TARGET_CLUSTER_NAME>/`, on the branch given by
-`GITOPS_TARGET_REVISION`.
+The root Application resolves `generated/clusters/<TARGET_CLUSTER_NAME>/`, on the
+branch given by `GITOPS_TARGET_REVISION`.
 
 Use cluster-scoped paths from day one, even while there is only one cluster.
 A flat layout works right up until the second cluster appears, and then forces a
@@ -35,18 +35,19 @@ resources. The root Application does not pin a source type, so Argo CD
 auto-detects: a directory of plain YAML manifests, a kustomization, or a Helm
 chart all work. Pick one and stay with it.
 
-**If you pick plain YAML, keep `clusters/<name>/` flat.** Argo CD reads only the
-top level of a directory source unless `spec.source.directory.recurse` is set,
-and the root Application cannot set it: any `spec.source.directory` block makes
-the source type explicit and switches the auto-detection above off, which would
-rule out the kustomization and Helm layouts. Files in a subdirectory would be
-silently ignored rather than reported as an error. If you want structure, get it
-from a kustomization or a chart, which recurse through their own references.
+**If you pick plain YAML, keep `generated/clusters/<name>/` flat.** Argo CD reads
+only the top level of a directory source unless `spec.source.directory.recurse`
+is set, and the root Application cannot set it: any `spec.source.directory` block
+makes the source type explicit and switches the auto-detection above off, which
+would rule out the kustomization and Helm layouts. Files in a subdirectory would
+be silently ignored rather than reported as an error. If you want structure, get
+it from a kustomization or a chart, which recurse through their own references.
 
-What is under `clusters/<name>/` is a list of pointers, not the workloads
-themselves. Shared component definitions live elsewhere in the repository and are
-referenced per cluster, so that a cluster's manifest reads as a list of what that
-cluster runs.
+What is under `generated/clusters/<name>/` is a list of pointers, not the
+workloads themselves, and it is written by the gitops repository's own generator
+rather than hand-authored. Shared component definitions live elsewhere in the
+repository and are referenced per cluster, so that a cluster's manifest reads as
+a list of what that cluster runs.
 
 ## What a cluster needs to be usable
 

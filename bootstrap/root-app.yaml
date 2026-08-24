@@ -1,18 +1,19 @@
 # The handoff. Applying this is the last imperative act against the cluster:
-# from here Argo CD reconciles clusters/${TARGET_CLUSTER_NAME}/ in the gitops
-# repository, including the Application that manages Argo CD itself.
+# from here Argo CD reconciles generated/clusters/${TARGET_CLUSTER_NAME}/ in the
+# gitops repository, including the Application that manages Argo CD itself.
 #
 # `${...}` placeholders are expanded from the environment by `just bootstrap`.
 #
 # The source type is deliberately left unset so Argo CD auto-detects it. The
-# gitops repository may render clusters/<name>/ as plain Application manifests,
-# a kustomization, or a Helm chart. See docs/gitops-repo.md.
+# gitops repository may render generated/clusters/<name>/ as plain Application
+# manifests, a kustomization, or a Helm chart. See docs/gitops-repo.md.
 #
-# CONTRACT: as a plain-YAML directory, clusters/<name>/ must be flat. Argo CD
-# does not recurse unless spec.source.directory.recurse is set, and setting it
-# is not an option here: any spec.source.directory block makes the source type
-# explicit, which switches auto-detection off and breaks the kustomization and
-# Helm layouts above. Nest with a kustomization or a chart, not subdirectories.
+# CONTRACT: as a plain-YAML directory, generated/clusters/<name>/ must be flat.
+# Argo CD does not recurse unless spec.source.directory.recurse is set, and
+# setting it is not an option here: any spec.source.directory block makes the
+# source type explicit, which switches auto-detection off and breaks the
+# kustomization and Helm layouts above. Nest with a kustomization or a chart,
+# not subdirectories.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -28,7 +29,7 @@ spec:
     # Quoted so a revision like `1.0` is not read as a number.
     repoURL: "${GITOPS_REPO_URL}"
     targetRevision: "${GITOPS_TARGET_REVISION}"
-    path: "clusters/${TARGET_CLUSTER_NAME}"
+    path: "generated/clusters/${TARGET_CLUSTER_NAME}"
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

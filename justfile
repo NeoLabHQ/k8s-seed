@@ -13,14 +13,15 @@ help:
   Seed this cluster and hand it over to the gitops repository.
 
   Runs once per cluster. After the handoff Argo CD manages itself from
-  clusters/$TARGET_CLUSTER_NAME/ in the gitops repository, and re-running this would
-  fight it — so it refuses if the handoff has already happened.
+  generated/clusters/$TARGET_CLUSTER_NAME/ in the gitops repository, and
+  re-running this would fight it — so it refuses if the handoff has already
+  happened.
 
   Steps:
     1. namespace + argo-cd release, then the gitops repository credential
     2. wait for argocd-server
     3. apply the root Application
-    4. Argo CD takes over from clusters/$TARGET_CLUSTER_NAME/
+    4. Argo CD takes over from generated/clusters/$TARGET_CLUSTER_NAME/
 
   Usage:
     just bootstrap
@@ -64,7 +65,7 @@ bootstrap:
     if kubectl get application argocd --namespace argocd >/dev/null 2>&1; then
         echo "Refusing: this cluster already has a self-managed 'argocd' Application." >&2
         echo "Bootstrap is a one-time seed. To change Argo CD here, edit its version or" >&2
-        echo "values in the gitops repository under clusters/\$TARGET_CLUSTER_NAME/ instead." >&2
+        echo "values in the gitops repository under generated/clusters/\$TARGET_CLUSTER_NAME/ instead." >&2
         exit 1
     fi
 
@@ -93,7 +94,7 @@ bootstrap:
 
     step="4/4 handoff"
     echo
-    echo "==> $step: Argo CD now reconciles clusters/$TARGET_CLUSTER_NAME/."
+    echo "==> $step: Argo CD now reconciles generated/clusters/$TARGET_CLUSTER_NAME/."
     echo "Check it with 'just verify', open the UI with 'just argo-ui'."
 
 [doc("Apply the gitops repository credential Secret — the GitHub App — with .env expanded into it.")]
@@ -170,9 +171,9 @@ _apply-root-app:
     # Self-guarding for the same reason as `_apply-repo-secret`: a private
     # recipe can be invoked directly, so it cannot rely on its caller's checks.
     # `main` is a genuinely safe default; the other two have none. An empty
-    # TARGET_CLUSTER_NAME resolves to the path `clusters/` rather than failing, and an
-    # empty repoURL yields a root Application the cluster accepts and then never
-    # syncs — a handoff that looks like it worked.
+    # TARGET_CLUSTER_NAME resolves to the path `generated/clusters/` rather than
+    # failing, and an empty repoURL yields a root Application the cluster accepts
+    # and then never syncs — a handoff that looks like it worked.
     export GITOPS_TARGET_REVISION="${GITOPS_TARGET_REVISION:-main}"
     : "${GITOPS_REPO_URL:?set GITOPS_REPO_URL in .env}"
     : "${TARGET_CLUSTER_NAME:?set TARGET_CLUSTER_NAME in .env}"
@@ -220,11 +221,12 @@ verify:
     case "$sync" in
         Synced)
             echo "OK: root Application is synced." ;;
-        # Expected until the gitops repository has a clusters/$TARGET_CLUSTER_NAME/ path.
+        # Expected until the gitops repository's generator has written
+        # generated/clusters/$TARGET_CLUSTER_NAME/.
         # 'When the root Application sits Unknown' in docs/how-to-launch-cluster.md
         # tells this apart from a credential failure.
         Unknown)
-            echo "OK: root Application is Unknown — expected while clusters/\$TARGET_CLUSTER_NAME/ is empty." ;;
+            echo "OK: root Application is Unknown — expected while generated/clusters/\$TARGET_CLUSTER_NAME/ is empty." ;;
         "")
             echo "FAILED: Argo CD has not reported on the root Application." >&2
             exit 1 ;;

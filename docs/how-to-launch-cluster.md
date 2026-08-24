@@ -209,7 +209,7 @@ Copy `.env.example` to `.env` and fill it in. Every field is documented in
 place; the shape of it is:
 
 - `TARGET_CLUSTER_NAME` — the only value that differs between clusters. It selects
-  `clusters/<name>/` in the gitops repository.
+  `generated/clusters/<name>/` in the gitops repository.
 - `GITOPS_REPO_URL` and `GITOPS_TARGET_REVISION` — where the gitops repository
   is and which revision to track. The URL must be the HTTPS one; a GitHub App
   authenticates git over HTTP, not SSH.
@@ -243,7 +243,7 @@ Four things happen:
    Helm release, then the gitops repository credential Secret is applied.
 2. The recipe waits for `argocd-server` to roll out.
 3. `bootstrap/root-app.yaml` is applied — an Argo CD `Application` pointing at
-   `clusters/$TARGET_CLUSTER_NAME/` in the gitops repository.
+   `generated/clusters/$TARGET_CLUSTER_NAME/` in the gitops repository.
 4. Argo CD syncs that path. Among the Applications it finds there is one that
    manages Argo CD itself. That is the handoff.
 
@@ -256,7 +256,7 @@ just verify
 This asserts rather than reports: it waits for every Argo CD Deployment to go
 available and then reads the root Application's sync status, exiting non-zero if
 either is wrong. A clean run prints the workloads plus a `root` Application whose
-`PATH` column reads `clusters/<your cluster name>`.
+`PATH` column reads `generated/clusters/<your cluster name>`.
 
 `Synced` and `Unknown` both pass. `Unknown` is not automatically a problem — see
 the next section — whereas `OutOfSync` means Argo CD read the path and disagrees
@@ -301,9 +301,11 @@ kubectl get application root --namespace argocd \
 ```
 
 **The gitops repository has nothing at that path yet.** The message reads
-`clusters/<name>: app path does not exist`. Expected on a fresh gitops
-repository, and it resolves itself the moment you commit `clusters/<name>/`.
-Nothing is wrong with the seed.
+`generated/clusters/<name>: app path does not exist`. Expected on a fresh gitops
+repository, and it resolves itself once that repository's generator has produced
+`generated/clusters/<name>/` — that tree is generated rather than hand-authored,
+so this is something to run or wait for on the gitops side, not a directory you
+create by hand. Nothing is wrong with the seed.
 
 **Argo CD cannot reach the repository at all.** A wrong URL, a GitHub App that
 was never installed on this repository or has lost its `Contents: Read-only`
@@ -365,7 +367,8 @@ The procedure above does not change. The only difference in this repository is
 `TARGET_CLUSTER_NAME`.
 
 Everything that actually distinguishes the main cluster lives in the gitops
-repository: `clusters/main/` additionally carries Kargo, which the spokes do not
-run. The seed is deliberately identical everywhere, so that per-cluster variation
-lives where it can be reviewed as a diff and reconciled continuously, rather
-than in an imperative script run once from somebody's laptop.
+repository: `generated/clusters/main/` additionally carries Kargo, which the
+spokes do not run. The seed is deliberately identical everywhere, so that
+per-cluster variation lives where it can be reviewed as a diff and reconciled
+continuously, rather than in an imperative script run once from somebody's
+laptop.
