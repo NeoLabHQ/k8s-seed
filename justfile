@@ -340,6 +340,7 @@ switch-to-local-cluster:
 
 cluster-info:
     kubectl cluster-info
+    kubectl config current-context
     kubectl get pods --all-namespaces
 
 [doc("Delete a local k3d cluster")]
