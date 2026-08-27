@@ -47,17 +47,6 @@ releases:
     chart: argo/argo-cd
     # Pinned, never a range: the gitops repository must install this exact
     # version when it adopts the release. See docs/gitops-repo.md.
-    #
-    # Chosen, not stale. Index checked 2026-08-06: 10.3.0 (2026-08-05) and
-    # 10.2.3 (2026-08-04) both ship Argo CD v3.5.0, two days old at the time.
-    # 10.2.2 is v3.4.6, the soaked v3.4 line. Since every cluster is seeded with
-    # this version and gitops has to match it exactly, a two-day-old minor is
-    # the wrong thing to standardise on.
-    #
-    # Revisit when either is true, whichever comes first: a v3.5 chart has run in
-    # a non-production cluster here for a full release cycle, or the date passes
-    # 2026-11-06. A deliberate lag nobody re-checks is indistinguishable from
-    # staleness, so this pin needs a trigger, not just a reason.
-    version: 10.2.2
+    version: 10.4.0
     values:
       - bootstrap/argocd-values.yaml.gotmpl
