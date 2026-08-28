@@ -261,12 +261,21 @@ current-context:
 # LOCAL TEST CLUSTER
 # ---------------------------------------------------------------------------------------------------------------------
 
+[doc("Create a local k3d cluster, switch to it, and bootstrap the cluster.")]
+local-up: create-local-cluster switch-to-local-cluster bootstrap
+
 [doc("Create a local k3d cluster to try the seed against. Delete it with `just delete-local-cluster`.")]
 create-local-cluster:
     #!/usr/bin/env bash
     set -euo pipefail
     name="${CLUSTER_NAME:-k8s-seed}"
-    k3d cluster create "$name"
+    k3d cluster create "$name" \
+        --agents 0 \
+        --port "80:80@server:0" \
+        --port "443:443@server:0" \
+        --k3s-arg "--disable=traefik@server:*" \
+        --k3s-arg "--disable=metrics-server@server:*" \
+        --wait --timeout 600s
     just use-local-cluster
 
 [doc("""
@@ -330,6 +339,18 @@ use-local-cluster:
     esac
 
     echo "kubectl context $(kubectl config current-context) -> $server"
+
+[doc("Delete the local k3d cluster and everything in it. Idempotent.")]
+local-down:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    name="${CLUSTER_NAME:-k8s-seed}"
+    if ! k3d cluster list "$name" >/dev/null 2>&1; then
+        echo "No k3d cluster named '$name'; nothing to delete."
+        exit 0
+    fi
+    k3d cluster delete "$name"
 
 switch-to-local-cluster:
     #!/usr/bin/env bash
