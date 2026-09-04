@@ -88,8 +88,14 @@ So, when writing it:
 - Pin the same chart version this repository pins. It is a literal version in
   `helmfile.yaml`, never a range, precisely so it can be matched.
 - Start from the values in `bootstrap/argocd-values.yaml.gotmpl` and keep them
-  equivalent. The parameters that vary — the cluster label, the hostname, the
-  OIDC client — are visible there.
+  equivalent. The parameters that vary — the cluster label and the hostname — are
+  visible there. The seed configures no SSO at all, so the issuer, the client
+  credentials and the RBAC that follows them are yours to define here, with
+  nothing the seed wrote to contend with. `dex.enabled: false` is the one value
+  to match rather than reconsider: the seed sets it unconditionally so that no
+  cluster is ever seeded with a bundled Dex. Clusters seeded by an older version
+  do still carry one, and setting it here does not undo that —
+  [how-to-launch-cluster.md](how-to-launch-cluster.md#sso-signs-in-and-then-drops-you).
 - Name it `argocd`, in the `argocd` namespace. `just bootstrap` looks for an
   Application by that name to decide whether the cluster has already been handed
   over, and refuses to re-seed if it finds one.
@@ -98,9 +104,12 @@ After the handoff, Argo CD is upgraded by changing the version in the gitops
 repository. Never by re-running bootstrap.
 
 This is also where the Argo CD configuration that the seed leaves deliberately
-bare belongs — most importantly RBAC. The seed grants SSO users nothing at all;
-mapping a GitHub org or team to a role is part of the self-management
-Application.
+bare belongs — SSO itself, and most importantly RBAC. The seed installs an
+admin-account-only Argo CD and grants nobody else anything at all; configuring an
+issuer and mapping a GitHub org or team to a role are both part of the
+self-management Application. Grant the access itself under
+`configs.rbac.policy.csv`; until that key exists, the day-0 admin account from
+`just argo-password` is the only login with any permissions.
 
 ## Ordering
 

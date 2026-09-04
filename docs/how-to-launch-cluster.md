@@ -42,8 +42,9 @@ afterwards which cluster you hit.
 
 Argo CD clones the gitops repository as a GitHub App, per
 [the Argo CD GitHub App credential docs][argocd-github-app]. One app can serve
-every cluster: unlike the OAuth App below it has no callback URL, so there is
-nothing per-cluster about it.
+every cluster: it has no callback URL and nothing else that is per-cluster. It is
+also the only GitHub registration this seed asks for — the seed configures no
+SSO, so there is no OAuth App to register alongside it.
 
 [argocd-github-app]: https://argo-cd.readthedocs.io/en/stable/user-guide/private-repositories/#github-app-credential
 
@@ -174,35 +175,6 @@ when you switch that feature on, and only if you reuse this app for it.
 - **GitHub Enterprise Server** is not a permission but an extra Secret field,
   `githubAppEnterpriseBaseUrl` — see `bootstrap/repo-secret.yaml`.
 
-## Register the GitHub OAuth App
-
-Argo CD authenticates users through the Dex bundled in its Helm chart, and Dex
-delegates to GitHub. Each cluster needs its own GitHub OAuth App, because an
-OAuth App allows exactly one callback URL and each cluster has its own hostname.
-
-An OAuth App is not the GitHub App from the previous section. Different
-registration page, different credentials, no overlap: this one signs humans in to
-the UI, that one is how Argo CD clones. You need both.
-
-In your GitHub organisation, under **Settings → Developer settings → OAuth Apps**,
-create a new app:
-
-- **Homepage URL** — `https://<the hostname this cluster's Argo CD will use>`
-- **Authorization callback URL** — the same hostname with `/api/dex/callback`
-  appended
-
-Generate a client secret and keep both values for the next step.
-
-Note down the organisation name too. Out of the box the connector accepts any
-GitHub account — everyone lands on the Argo CD login and, because default RBAC
-is empty, gets no permissions once there. That is an unnecessarily wide
-authentication boundary, so set `GITHUB_ORG` below to the organisation that owns
-the app and Dex will turn away everyone outside it.
-
-If you later move to a central Dex broker that fronts GitHub for every cluster,
-you will not need one app per cluster any more. That migration is a change of
-values, not of the seed: see `OIDC_ISSUER_URL` below.
-
 ## Fill in `.env`
 
 Copy `.env.example` to `.env` and fill it in. Every field is documented in
@@ -217,12 +189,14 @@ place; the shape of it is:
   `GITOPS_REPO_GITHUB_APP_PRIVATE_KEY_PATH` — the GitHub App you just
   registered. The last one is the path to the `.pem`, not its contents; the
   recipe reads and encodes the file, so nothing multi-line ever goes in `.env`.
-- `ARGO_HOST` — the hostname from the OAuth App you just registered.
-- `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` — that app's credentials.
-- `GITHUB_ORG` — the organisation allowed to sign in. Optional, but leaving it
-  empty lets any GitHub account reach the login.
-- `OIDC_ISSUER_URL` — leave empty. Setting it switches the bundled Dex off and
-  trusts an external issuer instead.
+- `ARGO_HOST` — the hostname this cluster's Argo CD will answer on. It becomes
+  `global.domain` in the chart and the Argo CD external URL. It does not resolve
+  until the gitops repository has delivered ingress and DNS.
+
+There is deliberately nothing about SSO in `.env`. The seed installs an
+admin-account-only Argo CD and the gitops repository owns 100% of SSO — the
+issuer, the client credentials and the RBAC that follows them. See
+[Authentication](../README.md#authentication).
 
 There are no defaults for the values that matter, and a missing one always fails
 before anything is created, so a botched `.env` cannot leave you
@@ -247,6 +221,13 @@ Four things happen:
 4. Argo CD syncs that path. Among the Applications it finds there is one that
    manages Argo CD itself. That is the handoff.
 
+The handoff transfers ownership; it does not clean up after the seed. That is
+why the seed configures no SSO at all: anything it wrote into `argocd-cm` would
+outlive the handoff and sit alongside whatever the gitops repository configures
+later — see
+[SSO signs in and then drops you](#sso-signs-in-and-then-drops-you) for the
+failure that produced on clusters seeded by older versions.
+
 ## Verify it
 
 ```bash
@@ -269,24 +250,26 @@ just argo-password   # the initial admin password
 just argo-ui         # port-forward to http://localhost:8080
 ```
 
-### Day 0 has no ingress, and that is correct
+### Day 0 has no ingress and no SSO, and that is correct
 
 Port-forwarding is the only way to reach Argo CD after bootstrap, and the admin
 password is the only way to log in. This is not a broken installation.
 
 Ingress needs an ingress controller and certificates need cert-manager, and
 neither is part of the seed — they arrive from the gitops repository, which
-Argo CD has only just started reconciling. SSO has the same dependency: the
-GitHub callback URL points at `ARGO_HOST`, which does not resolve to anything
-until DNS and ingress exist.
+Argo CD has only just started reconciling. SSO belongs to that repository too,
+and it has the same dependency whichever issuer it picks: a redirect URI points
+at `ARGO_HOST`, which does not resolve to anything until DNS and ingress exist.
 
 Once the gitops repository has delivered ingress-nginx, cert-manager and
-external-dns, `https://$ARGO_HOST` starts working and SSO with it. Until then,
-`just argo-ui` is the supported path.
+external-dns, `https://$ARGO_HOST` starts working, and SSO follows once that
+repository configures it. Until then, `just argo-ui` and the admin account are
+the supported path.
 
-Note also that signing in through GitHub will initially grant no permissions at
-all. Argo CD's default RBAC policy is empty, and mapping your GitHub org or team
-to a role is part of the Argo CD configuration the gitops repository owns.
+Note also that a user who does eventually sign in gets no permissions at all to
+begin with. Argo CD's default RBAC policy is empty, and mapping your GitHub org
+or team to a role is part of the Argo CD configuration the gitops repository
+owns.
 
 ### When the root Application sits `Unknown`
 
@@ -340,6 +323,55 @@ argocd repo list
 The repository should be listed with `STATUS` `Successful`. If it is missing,
 the credential Secret did not apply; if it is listed as `Failed`, the credential
 is wrong.
+
+### SSO signs in and then drops you
+
+**This is a repair for a legacy cluster.** The current seed cannot produce this
+state: it configures no SSO and sets `dex.enabled: false`, so it creates neither
+the ConfigMap key nor the Deployment below. Clusters seeded before that change
+still carry both, and nothing removes them automatically — this is how they are
+fixed.
+
+You reach GitHub, authorise, come back to Argo CD and land on the login page,
+logged out. The server log shows the sign-in succeeding and the very next
+request failing:
+
+```bash
+kubectl logs deployment/argocd-server --namespace argocd | grep -i "verify session"
+```
+
+`failed to verify provider token: token verification failed for all audiences`
+next to a successful `Web login successful` means Argo CD is signing users in
+against one issuer and verifying their session tokens against another. Check
+whether `argocd-cm` holds both keys:
+
+```bash
+kubectl get configmap argocd-cm --namespace argocd -o yaml \
+  | grep -E '^  (oidc|dex)\.config:'
+```
+
+Two lines is the fault: the bundled Dex takes the verification path regardless of
+which issuer the login used. It happens on a cluster that an older seed gave a
+`dex.config` and a bundled Dex of its own, and that the gitops repository later
+moved onto a central broker. The handoff leaves both the key and the Deployment
+behind, for the reasons in
+[gitops-repo.md](gitops-repo.md#argo-cd-must-manage-itself-at-the-version-it-was-seeded-with).
+
+Fixing it means removing what that older seed left, not re-running bootstrap,
+which refuses on a handed-over cluster anyway. The `dex.config` it wrote is a key
+no Argo CD Application owns, and `argocd-dex-server` is a Deployment from its
+Helm release, so both are deleted directly, once, by hand:
+
+```bash
+kubectl patch configmap argocd-cm --namespace argocd \
+  --type json -p '[{"op": "remove", "path": "/data/dex.config"}]'
+kubectl delete deployment argocd-dex-server --namespace argocd
+kubectl rollout restart deployment/argocd-server --namespace argocd
+```
+
+Restart `argocd-server` so it picks up the change immediately. A cluster seeded
+by the current seed never reaches this state, because neither the key nor the
+Deployment is created in the first place.
 
 ## The handoff is one-way
 

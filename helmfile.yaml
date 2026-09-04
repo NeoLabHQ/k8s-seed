@@ -23,15 +23,6 @@ environments:
         # this line a bare `helmfile apply` would seed Argo CD against no
         # gitops repository at all and only fail two steps later.
         gitopsRepoUrl: {{ requiredEnv "GITOPS_REPO_URL" | quote }}
-        oidc:
-          clientId: {{ requiredEnv "OIDC_CLIENT_ID" | quote }}
-          clientSecret: {{ requiredEnv "OIDC_CLIENT_SECRET" | quote }}
-          # Unset is a correct default: it selects the Dex bundled in the chart.
-          issuerUrl: {{ env "OIDC_ISSUER_URL" | quote }}
-          # Optional. Restricts GitHub sign-in to members of this organisation.
-          # Empty is a usable default but a wide one — see the comment on the
-          # connector in bootstrap/argocd-values.yaml.gotmpl.
-          githubOrg: {{ env "GITHUB_ORG" | quote }}
 
 ---
 repositories:

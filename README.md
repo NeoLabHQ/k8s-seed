@@ -51,8 +51,8 @@ per-white-label production clusters. No cluster reaches another's Kubernetes API
 Because the seed has to be identical on every one of them, exactly one value here
 is per-cluster: **`TARGET_CLUSTER_NAME`**, which selects
 `generated/clusters/<name>/`. Everything else — the gitops repository URL and
-credential, the Argo CD hostname, the OIDC client — is environment
-configuration, not topology.
+credential, and the Argo CD hostname — is environment configuration, not
+topology.
 
 The bootstrap sequence is four steps, and `just bootstrap` keeps all four
 visible rather than hiding the last one in a lifecycle hook:
@@ -95,9 +95,8 @@ just argo-ui            # port-forward the UI to http://localhost:8080
 `just --list` shows the rest. `just contexts` and `just current-context` are
 worth running before `just bootstrap`.
 
-Full walkthrough, including registering the two GitHub apps this needs — the
-GitHub App that reads the gitops repository, the OAuth App that signs users in —
-and reading the failure modes:
+Full walkthrough, including registering the GitHub App that reads the gitops
+repository, and reading the failure modes:
 **[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md)**.
 
 What the gitops repository has to provide for any of this to be useful:
@@ -164,30 +163,44 @@ behaviour working, not a bug.
 
 ## Authentication
 
-Argo CD authenticates through the Dex bundled in its own Helm chart, which
-delegates to GitHub — no extra components. Each cluster needs its own GitHub
-OAuth App, because an OAuth App permits a single callback URL.
+The seed installs an **admin-account-only** Argo CD. It configures no SSO
+whatsoever — no issuer, no client credentials, and, most importantly, no Dex.
+The gitops repository owns 100% of SSO.
 
-The issuer is a parameter (`OIDC_ISSUER_URL`). Leave it empty and the bundled Dex
-is the issuer. Set it and the bundled Dex switches off and Argo CD trusts the
-issuer you named, so moving to a central Dex broker later is a change of values
-rather than a reshaping of the seed.
+That is not deferred work. SSO cannot function at bootstrap: the redirect URI is
+built from `ARGO_HOST`, which resolves to nothing until the gitops repository has
+delivered ingress, DNS and certificates, and where a central broker is the
+issuer, the broker is itself a workload that repository deploys, with a client
+secret that arrives alongside it. Day-0 access is `just argo-password` and
+`just argo-ui`.
 
-Set `GITHUB_ORG` to restrict who can complete the sign-in to members of one
-organisation. It is optional and narrows authentication only.
+Seeding SSO also caused a real outage, which is why
+`bootstrap/argocd-values.yaml.gotmpl` sets `dex.enabled: false` unconditionally
+and marks that line load-bearing. Argo CD three-way merges `argocd-cm` and prunes
+only the keys its own Application declares, so a `dex.config` written by the seed
+survives the handoff. The cluster then holds the seed's `dex.config` next to the
+gitops repository's `oidc.config`: sign-in follows `oidc.config` and succeeds,
+while every subsequent session-token check follows the bundled Dex and fails, so
+users log in and land straight back on the login page. Deleting the `dex:` block
+as redundant would bring the fault back, because the argo-cd chart defaults
+`dex.enabled` to true.
 
-That OAuth App logs *people* in. How Argo CD itself reads the gitops repository
-is a separate identity and a separate registration: a **GitHub App**, installed
-on the repository with `Contents: Read-only`, whose App ID, installation ID and
-private key make up `bootstrap/repo-secret.yaml`. The two are easy to confuse and
-cannot substitute for one another — `.env.example` documents both, and
-[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md) walks through
-registering them.
+Clusters seeded before this change still carry that `dex.config` and an
+`argocd-dex-server` Deployment. The seed no longer creates either, and nothing
+removes what an older seed already created —
+[docs/how-to-launch-cluster.md](docs/how-to-launch-cluster.md#sso-signs-in-and-then-drops-you)
+has the one-off repair.
 
-Authorisation is separate and the seed grants none of it: Argo CD's default RBAC
-policy is empty, so a user who signs in successfully can still do nothing.
-Mapping a GitHub org or team to a role is part of the Argo CD configuration the
-gitops repository owns.
+How Argo CD reads the gitops repository is a different question, and that *is*
+seeded, because the root Application cannot clone without it: a **GitHub App**,
+installed on the repository with `Contents: Read-only`, whose App ID,
+installation ID and private key make up `bootstrap/repo-secret.yaml`. It signs no
+humans in; it is the identity Argo CD itself clones with, and the only GitHub
+registration this seed asks for.
+
+Authorisation belongs to the gitops repository as well, and the seed grants none
+of it: Argo CD's default RBAC policy is empty. Mapping a GitHub org or team to a
+role is part of the Argo CD configuration the gitops repository owns.
 
 ## Prior art
 

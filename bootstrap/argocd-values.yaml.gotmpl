@@ -6,8 +6,9 @@
 # the same resources. See docs/gitops-repo.md.
 
 global:
-  # Drives the Argo CD external URL, the SSO redirect URI, and any ingress the
-  # gitops repository later adds.
+  # Drives the Argo CD external URL and any ingress the gitops repository later
+  # adds. It is also the host an SSO redirect URI is built from once the gitops
+  # repository configures SSO — which the seed never does; see below.
   domain: {{ .Values.argoHost | quote }}
 
   additionalLabels:
@@ -24,63 +25,33 @@ configs:
     # and redirects :80 to :443.
     server.insecure: true
 
-  cm:
-    {{- if .Values.oidc.issuerUrl }}
-    # An issuer was supplied, so trust it directly and leave the bundled Dex off.
-    # This is the path to a central Dex broker: it is a value change, not a
-    # reshape of the seed.
-    oidc.config: |
-      name: SSO
-      issuer: {{ .Values.oidc.issuerUrl }}
-      clientID: $oidc.clientID
-      clientSecret: $oidc.clientSecret
-      requestedScopes: [openid, profile, email, groups]
-    {{- else }}
-    # No issuer supplied, so the Dex bundled in the chart is the issuer, served
-    # at https://{{ .Values.argoHost }}/api/dex. One GitHub OAuth App per
-    # cluster, because OAuth Apps allow a single callback URL.
-    #
-    # `orgs` narrows who may complete the OAuth flow to members of GITHUB_ORG.
-    # It is optional, and omitting it lets any GitHub account reach the login —
-    # they get nothing, since default RBAC grants no permissions, but that is a
-    # wider authentication boundary than a cluster needs. Comments live out here
-    # rather than inside the block below, which is copied verbatim into
-    # argocd-cm.
-    dex.config: |
-      connectors:
-        - type: github
-          id: github
-          name: GitHub
-          config:
-            clientID: $oidc.clientID
-            clientSecret: $oidc.clientSecret
-            {{- if .Values.oidc.githubOrg }}
-            orgs:
-              - name: {{ .Values.oidc.githubOrg }}
-            {{- end }}
-    {{- end }}
+  # No `cm.oidc.config`, no `cm.dex.config`, no `secret.extra` OIDC credentials
+  # and no `rbac:` key here, deliberately. The seed installs an
+  # admin-account-only Argo CD; the gitops repository owns 100% of SSO, both the
+  # issuer and the authorisation that follows it.
+  #
+  # This is not deferral of work the seed could do. SSO cannot function at
+  # bootstrap in the first place: the redirect URI is built from the hostname
+  # above, which resolves to nothing until the gitops repository has delivered
+  # ingress, DNS and certificates, and where a central broker is the issuer,
+  # that broker is itself a gitops workload whose client secret arrives with it.
+  # The initial admin account is the way in until then — `just argo-password`.
+  #
+  # Seeding it was also actively harmful, which is why this is a hard rule
+  # rather than a preference. Argo CD three-way merges argocd-cm and prunes only
+  # the keys its own Application declares, so a `dex.config` written here is
+  # absent from that Application's last-applied-configuration and survives the
+  # handoff. A cluster then carries a seeded `dex.config` alongside the gitops
+  # repository's `oidc.config`, and the two disagree: login follows `oidc.config`
+  # and succeeds, while per-request session-token verification follows the
+  # bundled Dex and fails, so users sign in and land back on the login page. One
+  # ConfigMap key with two owners is the whole fault — the split rule in
+  # docs/gitops-repo.md exists to prevent exactly this.
 
-  # No `rbac:` key here, deliberately. The chart's default policy is empty
-  # (policy.csv and policy.default both ""), so a user who completes SSO reaches
-  # a UI that permits nothing. That dead end on day 0 is the intended state:
-  # authentication has to be seeded because Argo CD cannot be reached without
-  # it, but authorisation is Argo CD configuration, which the split rule in
-  # docs/gitops-repo.md gives to the gitops repository. Seeding even a minimal
-  # default policy would put one key under two owners — the self-management
-  # Application would reconcile it away at the first sync, leaving a seed value
-  # that no longer describes the cluster. Grant access in the gitops repository
-  # under configs.rbac.policy.csv; until then, log in as admin with the password
-  # from `just argo-password`.
-
-  secret:
-    extra:
-      # Referenced as $oidc.clientID / $oidc.clientSecret above. Argo CD resolves
-      # those from argocd-secret, which keeps the credentials out of the
-      # argocd-cm ConfigMap.
-      oidc.clientID: {{ .Values.oidc.clientId | quote }}
-      oidc.clientSecret: {{ .Values.oidc.clientSecret | quote }}
-
-# The bundled Dex is the default issuer and is switched off only when an
-# external one is configured above.
+# LOAD-BEARING. Not redundant tidiness, and not safe to delete as "already the
+# default": the argo-cd chart defaults dex.enabled to *true*, so removing this
+# block installs the bundled Dex on every seeded cluster — the exact object the
+# comment above exists to keep off them. Unconditional, because there is no
+# longer any input that could legitimately turn it back on.
 dex:
-  enabled: {{ not .Values.oidc.issuerUrl }}
+  enabled: false

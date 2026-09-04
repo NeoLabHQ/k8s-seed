@@ -239,7 +239,7 @@ verify:
 # ACCESS
 # ---------------------------------------------------------------------------------------------------------------------
 
-[doc("Print the initial admin password. Day-0 login, before SSO is usable.")]
+[doc("Print the initial admin password. The seed configures no SSO, so this is how you log in.")]
 argo-password:
     @kubectl get secret argocd-initial-admin-secret --namespace argocd \
         -o jsonpath='{.data.password}' | base64 -d && echo
